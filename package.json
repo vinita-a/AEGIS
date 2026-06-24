@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix ./frontend run start",
+    "start:lan": "npm --prefix ./frontend run start:lan",
+    "start:tunnel": "npm --prefix ./frontend run start:tunnel",
+    "start:local": "npm --prefix ./frontend run start:local",
+    "android": "npm --prefix ./frontend run android",
+    "ios": "npm --prefix ./frontend run ios",
+    "web": "npm --prefix ./frontend run web"
+  }
+}

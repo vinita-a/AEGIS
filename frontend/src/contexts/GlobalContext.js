@@ -9,10 +9,14 @@ export const GlobalProvider = ({ children }) => {
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [user, setUser] = useState(null);
+  const [notifications, setNotifications] = useState([]);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isContextLoaded, setIsContextLoaded] = useState(false);
 
   const toggleSOS = () => setIsSOSActive(!isSOSActive);
+  const addNotification = (notification) => setNotifications((prev) => [notification, ...prev]);
+  const removeNotification = (id) => setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const clearNotifications = () => setNotifications([]);
   
   const handleSetUser = async (userData) => {
     setUser(userData);
@@ -78,7 +82,7 @@ export const GlobalProvider = ({ children }) => {
   return (
     <GlobalContext.Provider value={{ 
       isSOSActive, toggleSOS, location, errorMsg, 
-      user, setUser: handleSetUser, isLoggedIn, setIsLoggedIn, logout, isContextLoaded
+      user, setUser: handleSetUser, notifications, addNotification, removeNotification, clearNotifications, isLoggedIn, setIsLoggedIn, logout, isContextLoaded
     }}>
       {children}
     </GlobalContext.Provider>

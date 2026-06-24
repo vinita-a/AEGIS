@@ -25,10 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def log_requests(request, call_next):
-    print(f"Incoming Request: {request.method} {request.url}")
-    return await call_next(request)
+# @app.middleware("http")
+# async def log_requests(request, call_next):
+#     print(f"Incoming Request: {request.method} {request.url}")
+#     return await call_next(request)
 
 # Load pre-trained Random Forest ML Model for Routing Safety
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "aegis_safety_v2.pkl")
@@ -61,8 +61,45 @@ class RegisterRequest(BaseModel):
     latitude: float
     longitude: float
 
+class ReportRequest(BaseModel):
+    type: str
+    description: str
+    latitude: float
+    longitude: float
+    timestamp: str
+    userId: str = None
+    status: str = "pending"
+
+class ReportRespondRequest(BaseModel):
+    userId: str
+    action: str
+
+
+def get_user_info(db, phone: str):
+    if not phone:
+        return None
+    user = db.query(models.User).filter(models.User.phone == phone).first()
+    return {
+        "name": user.name if user else None,
+        "phone": phone,
+        "area": user.area if user else None,
+        "profile_photo": None
+    }
+
 # Create all tables (note: PostGIS extension must be active in DB)
 Base.metadata.create_all(bind=engine)
+
+@app.on_event("startup")
+def ensure_report_columns():
+    db = SessionLocal()
+    try:
+        db.execute(text("ALTER TABLE incident_reports ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
+        db.commit()
+    except Exception as e:
+        print(f"Error ensuring report columns: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 @app.on_event("startup")
 def load_csv_data():
@@ -162,7 +199,8 @@ def verify_otp(req: VerifyRequest, db=Depends(get_db)):
         "user_exists": user.name is not None,
         "user": {
             "name": user.name,
-            "area": user.area
+            "area": user.area,
+            "phone": user.phone
         }
     }
 
@@ -300,3 +338,101 @@ def get_safe_routes(start_lat: float, start_lon: float, end_lat: float, end_lon:
                 route["type"] = "BALANCED"
 
     return {"routes": evaluated_routes}
+
+@app.post("/api/reports")
+def submit_incident_report(req: ReportRequest, db=Depends(get_db)):
+    """Submits a new incident report from the mobile app."""
+    try:
+        # Create the report
+        geom_wkt = f"SRID=4326;POINT({req.longitude} {req.latitude})"
+        report = models.IncidentReport(
+            type=req.type,
+            description=req.description,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            user_id=req.userId,
+            status=req.status,
+            geom=geom_wkt
+        )
+        
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        
+        print(f"New incident report submitted: {req.type} at ({req.latitude}, {req.longitude})")
+        
+        return {
+            "status": "success", 
+            "message": "Report submitted successfully",
+            "report_id": report.id
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"Error submitting report: {e}")
+        return {"status": "error", "message": "Failed to submit report"}
+
+@app.patch("/api/reports/{report_id}/respond")
+def respond_to_incident_report(report_id: int, req: ReportRespondRequest, db=Depends(get_db)):
+    report = db.query(models.IncidentReport).filter(models.IncidentReport.id == report_id).first()
+    if not report:
+        return {"status": "error", "message": "Report not found"}
+
+    if req.action == "respond":
+        if report.user_id and report.user_id == req.userId:
+            return {"status": "error", "message": "Reporter cannot mark themselves as responder"}
+        if report.responder_id and report.responder_id != req.userId:
+            return {"status": "error", "message": "This report is already being handled by another responder."}
+        report.status = "in_review"
+        report.responder_id = req.userId
+    elif req.action == "resolve":
+        if report.user_id != req.userId and report.responder_id != req.userId:
+            return {"status": "error", "message": "Only the report creator or assigned responder can resolve this report."}
+        report.status = "resolved"
+        if not report.responder_id:
+            report.responder_id = req.userId
+    else:
+        return {"status": "error", "message": "Invalid action"}
+
+    db.commit()
+    db.refresh(report)
+
+    return {
+        "status": "success",
+        "report": {
+            "id": report.id,
+            "type": report.type,
+            "description": report.description,
+            "latitude": float(report.latitude) if report.latitude is not None else None,
+            "longitude": float(report.longitude) if report.longitude is not None else None,
+            "status": report.status,
+            "responder_id": report.responder_id,
+            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "user_id": report.user_id,
+            "reporter": get_user_info(db, report.user_id),
+            "responder": get_user_info(db, report.responder_id),
+        }
+    }
+
+@app.get("/api/reports")
+def get_incident_reports(db=Depends(get_db)):
+    """Returns all incident reports for frontend notifications and map alerts."""
+    reports = db.query(models.IncidentReport).order_by(models.IncidentReport.id.desc()).limit(50).all()
+    return {
+        "reports": [
+            {
+                "id": r.id,
+                "type": r.type,
+                "description": r.description,
+                "latitude": float(r.latitude) if r.latitude is not None else None,
+                "longitude": float(r.longitude) if r.longitude is not None else None,
+                "status": r.status,
+                "responder_id": r.responder_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "user_id": r.user_id,
+                "reporter": get_user_info(db, r.user_id),
+                "responder": get_user_info(db, r.responder_id),
+                "responder_status": "responding" if r.responder_id else "waiting"
+            }
+            for r in reports
+        ]
+    }

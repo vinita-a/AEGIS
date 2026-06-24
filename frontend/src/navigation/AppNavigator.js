@@ -7,6 +7,8 @@ import SOSScreen from '../screens/SOSScreen';
 import RoutePlanningScreen from '../screens/RoutePlanningScreen';
 import WearableScreen from '../screens/WearableScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import ReportScreen from '../screens/ReportScreen';
+import ZonesScreen from '../screens/ZonesScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Map, ShieldAlert, Watch, User } from 'lucide-react-native';
 import { View, Text } from 'react-native';
@@ -54,6 +56,8 @@ export default function AppNavigator() {
       {/* Keeping Planning and SOS accessible directly if needed */}
       <Stack.Screen name="RoutePlanning" component={RoutePlanningScreen} />
       <Stack.Screen name="SOSModal" component={SOSScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Report" component={ReportScreen} />
+      <Stack.Screen name="Zones" component={ZonesScreen} />
     </Stack.Navigator>
   );
 }

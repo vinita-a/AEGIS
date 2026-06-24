@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
-import { View, Text, SafeAreaView, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { User, Shield, MapPin, PhoneForwarded, Settings, ChevronRight, LogOut, Award } from 'lucide-react-native';

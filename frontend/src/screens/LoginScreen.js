@@ -1,11 +1,12 @@
 import React, { useState, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Phone, Lock, User, MapPin, ArrowRight, CheckCircle2 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 
-const API_HOST = '192.168.0.104'; // Match current backend host 
+import { API_BASE_URL } from '../config';
 
 export default function LoginScreen() {
   const navigation = useNavigation();
@@ -21,7 +22,7 @@ export default function LoginScreen() {
     if (phone.length < 10) return Alert.alert("Invalid Phone", "Please enter a valid 10-digit number.");
     setLoading(true);
     try {
-      const response = await fetch(`http://${API_HOST}:8000/api/auth/send-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
@@ -33,7 +34,7 @@ export default function LoginScreen() {
         Alert.alert("Error", data.message || "Failed to send OTP");
       }
     } catch (err) {
-      Alert.alert("Connection Error", "Check if backend is running at " + API_HOST);
+      Alert.alert("Connection Error", "Check if backend is running at " + API_BASE_URL);
     } finally {
       setLoading(false);
     }
@@ -43,7 +44,7 @@ export default function LoginScreen() {
     if (otp.length < 4) return;
     setLoading(true);
     try {
-      const response = await fetch(`http://${API_HOST}:8000/api/auth/verify-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, otp_code: otp }),
@@ -74,14 +75,14 @@ export default function LoginScreen() {
       const lat = location?.coords?.latitude || 12.9716;
       const lon = location?.coords?.longitude || 77.5946;
       
-      const response = await fetch(`http://${API_HOST}:8000/api/auth/register`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, name, area, latitude: lat, longitude: lon }),
       });
       const data = await response.json();
       if (data.status === 'success') {
-        setUser({ name, area });
+        setUser({ name, area, phone });
         setIsLoggedIn(true);
         navigation.replace('Main');
       } else {

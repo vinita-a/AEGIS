@@ -34,3 +34,17 @@ class UserOTP(Base):
     otp_code = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     expires_at = Column(DateTime)
+
+class IncidentReport(Base):
+    __tablename__ = "incident_reports"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type = Column(String)
+    description = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    user_id = Column(String, nullable=True)
+    responder_id = Column(String, nullable=True)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    geom = Column(Geometry(geometry_type='POINT', srid=4326), nullable=True)

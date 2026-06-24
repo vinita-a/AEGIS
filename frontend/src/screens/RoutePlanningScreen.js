@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Dimensions, Platform, Alert, Linking, PanResponder, Animated, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Dimensions, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { MapView, Polyline, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Search, MapPin, Navigation, Clock, Shield, AlertTriangle, ChevronRight, Activity } from 'lucide-react-native';
 import { GlobalContext } from '../contexts/GlobalContext';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const API_HOST = '192.168.0.104';
+import { API_BASE_URL } from '../config';
 
 export default function RoutePlanningScreen() {
   const navigation = useNavigation();
@@ -49,18 +49,20 @@ export default function RoutePlanningScreen() {
   };
 
   useEffect(() => {
-    if (isNavigating && location?.coords && mapRef.current) {
-      mapRef.current.animateCamera({
-        center: {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude
-        },
-        pitch: 60,
-        zoom: 18,
-        heading: location.coords.heading || 0
-      }, { duration: 1000 });
+    if (!isNavigating || !location?.coords || !mapRef.current) {
+      return;
     }
-  }, [location.coords.latitude, location.coords.longitude, location.coords.heading, isNavigating]);
+
+    mapRef.current.animateCamera({
+      center: {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      },
+      pitch: 60,
+      zoom: 18,
+      heading: location.coords.heading || 0
+    }, { duration: 1000 });
+  }, [location?.coords?.latitude, location?.coords?.longitude, location?.coords?.heading, isNavigating]);
 
   // Fit to route when routes are loaded
   useEffect(() => {
@@ -95,19 +97,18 @@ export default function RoutePlanningScreen() {
     setLoading(true);
     try {
       const { latitude, longitude } = location.coords;
-      const url = `http://${API_HOST}:8000/api/routes?start_lat=${latitude}&start_lon=${longitude}&end_lat=${destCoords.latitude}&end_lon=${destCoords.longitude}`;
+      const url = `${API_BASE_URL}/api/routes?start_lat=${latitude}&start_lon=${longitude}&end_lat=${destCoords.latitude}&end_lon=${destCoords.longitude}`;
       const response = await fetch(url);
-      const text = await response.text();
-      try {
-        const data = JSON.parse(text);
-        if (data.routes && data.routes.length > 0) {
-          setRoutes(data.routes);
-          setSelectedRouteIndex(0);
-        } else {
-          alert("No safe routes found for this destination.");
-        }
-      } catch (e) {
-        alert("AEGIS Server Error: The server returned an invalid response.");
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Routing request failed: ${response.status} ${errorText}`);
+      }
+      const data = await response.json();
+      if (data.routes && data.routes.length > 0) {
+        setRoutes(data.routes);
+        setSelectedRouteIndex(0);
+      } else {
+        alert("No safe routes found for this destination.");
       }
     } catch (err) {
       alert("Network Error: Could not reach the AEGIS Safety Server.");
