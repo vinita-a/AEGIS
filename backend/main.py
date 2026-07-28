@@ -1,6 +1,9 @@
 import os
+import datetime
 import pandas as pd
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sqlalchemy import text
 from database import engine, Base, SessionLocal, get_db
 import models
@@ -10,6 +13,13 @@ import numpy as np
 import requests
 
 app = FastAPI(title="AEGIS API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Load pre-trained Random Forest ML Model for Routing Safety
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "safety_model.pkl")
@@ -67,6 +77,52 @@ def load_csv_data():
 def health_check():
     return {"status": "ok", "app": "AEGIS API"}
 
+class SOSTriggerRequest(BaseModel):
+    user_name: str
+    user_phone: str
+    latitude: float
+    longitude: float
+
+class SOSResponse(BaseModel):
+    id: int
+    user_name: str
+    user_phone: str
+    latitude: float
+    longitude: float
+    status: str
+    created_at: datetime.datetime
+    cancelled_at: datetime.datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+@app.post("/api/sos/trigger", response_model=SOSResponse)
+def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
+    """Create an active SOS event for the triggering user."""
+    sos = models.SOSEvent(
+        user_name=payload.user_name,
+        user_phone=payload.user_phone,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        status="active",
+    )
+    db.add(sos)
+    db.commit()
+    db.refresh(sos)
+    return sos
+
+@app.patch("/api/sos/{sos_id}/cancel", response_model=SOSResponse)
+def cancel_sos(sos_id: int, db = Depends(get_db)):
+    """Mark an SOS event as cancelled once the user confirms they're safe."""
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    if not sos:
+        raise HTTPException(status_code=404, detail="SOS event not found")
+    sos.status = "cancelled"
+    sos.cancelled_at = datetime.datetime.utcnow()
+    db.commit()
+    db.refresh(sos)
+    return sos
+
 @app.get("/api/crimes/heatmap")
 def get_heatmap_data(db = Depends(get_db)):
     """Fetch clustered crime incidents for the frontend heat map."""
@@ -111,7 +167,10 @@ def get_safe_routes(start_lat: float, start_lon: float, end_lat: float, end_lon:
     osrm_url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?alternatives=3&geometries=geojson&overview=full"
     
     headers = {"User-Agent": "AEGIS_Safety_App/1.0"}
-    resp = requests.get(osrm_url, headers=headers)
+    try:
+        resp = requests.get(osrm_url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException:
+        return {"error": "Routing API completely failed."}
     if resp.status_code != 200:
         return {"error": "Routing API completely failed."}
         

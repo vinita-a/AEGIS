@@ -1,20 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { GlobalContext } from '../contexts/GlobalContext';
 
 export default function LoginScreen() {
   const navigation = useNavigation();
+  const { setUserProfile } = useContext(GlobalContext);
   const [step, setStep] = useState(1);
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
   const [area, setArea] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
 
   const handleNext = () => {
     if (step === 1 && phone.length >= 10) setStep(2);
     else if (step === 2 && otp.length === 4) setStep(3);
-    else if (step === 3 && name && area) {
-      // Login Complete
+    else if (step === 3 && name && area && emergencyContactPhone.length >= 10) {
+      // Login Complete — carry the profile forward so SOSScreen knows who to text
+      setUserProfile({ name, phone, area, emergencyContactName, emergencyContactPhone });
       navigation.replace('Home');
     }
   };
@@ -59,17 +64,33 @@ export default function LoginScreen() {
 
         {step === 3 && (
           <>
-            <TextInput 
+            <TextInput
               style={styles.input}
               placeholder="Full Name"
               value={name}
               onChangeText={setName}
             />
-            <TextInput 
+            <TextInput
               style={[styles.input, { marginTop: 15 }]}
               placeholder="Home Area (e.g. Indiranagar)"
               value={area}
               onChangeText={setArea}
+            />
+            <Text style={styles.sectionLabel}>Emergency Contact</Text>
+            <Text style={styles.sectionHint}>We'll text them your live location during an SOS.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Contact Name"
+              value={emergencyContactName}
+              onChangeText={setEmergencyContactName}
+            />
+            <TextInput
+              style={[styles.input, { marginTop: 15 }]}
+              placeholder="Contact Phone Number"
+              keyboardType="phone-pad"
+              value={emergencyContactPhone}
+              onChangeText={setEmergencyContactPhone}
+              maxLength={10}
             />
           </>
         )}
@@ -89,6 +110,8 @@ const styles = StyleSheet.create({
   content: { flex: 1, justifyContent: 'center', padding: 30 },
   title: { fontSize: 28, fontWeight: 'bold', marginBottom: 10 },
   subtitle: { fontSize: 16, color: '#666', marginBottom: 40 },
+  sectionLabel: { fontSize: 14, fontWeight: 'bold', color: '#999', marginTop: 10, textTransform: 'uppercase' },
+  sectionHint: { fontSize: 13, color: '#999', marginBottom: 15 },
   input: {
     borderBottomWidth: 2,
     borderColor: '#eee',
