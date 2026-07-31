@@ -4,11 +4,9 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { API_BASE_URL } from '../config';
 
 const { width, height } = Dimensions.get('window');
-
-// Dynamically use the same IP as HomeScreen for consistency
-const HOST = Platform.OS === 'android' ? '192.168.0.101' : '192.168.0.101'; 
 
 export default function RoutePlanningScreen() {
   const navigation = useNavigation();
@@ -42,7 +40,9 @@ export default function RoutePlanningScreen() {
   const searchLocation = async (query) => {
     if (query.length < 3) return;
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&viewbox=77.3,13.2,77.8,12.7&bounded=1`);
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&viewbox=77.3,13.2,77.8,12.7&bounded=1`, {
+        headers: { 'User-Agent': 'AEGIS_Safety_App/1.0' },
+      });
       const data = await response.json();
       setSearchResults(data);
     } catch (error) {
@@ -66,7 +66,7 @@ export default function RoutePlanningScreen() {
     if (!origin.coords || !destination.coords) return;
     setLoading(true);
     try {
-      const url = `http://${HOST}:8000/api/routes?start_lat=${origin.coords.latitude}&start_lon=${origin.coords.longitude}&end_lat=${destination.coords.latitude}&end_lon=${destination.coords.longitude}`;
+      const url = `${API_BASE_URL}/api/routes?start_lat=${origin.coords.latitude}&start_lon=${origin.coords.longitude}&end_lat=${destination.coords.latitude}&end_lon=${destination.coords.longitude}`;
       const response = await fetch(url);
       const data = await response.json();
       if (data.routes) {
