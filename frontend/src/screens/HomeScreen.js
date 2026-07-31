@@ -1,378 +1,511 @@
-import React, { useContext, useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Platform,
-} from "react-native";
-import { useNavigation, useRoute } from "@react-navigation/native";
-import { useRef } from "react";
-import MapView, {
-  Marker,
-  Circle,
-  Polyline,
-  PROVIDER_GOOGLE,
-} from "react-native-maps";
-import { GlobalContext } from "../contexts/GlobalContext";
-import { API_BASE_URL } from "../config";
+import React, { useContext, useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { GlobalContext } from '../contexts/GlobalContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Search, Send, Shield, MapPin, AlertTriangle, Bell, Layers } from 'lucide-react-native';
+import { MapView, Circle, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 
-const darkMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-  {
-    featureType: "administrative.locality",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#d59563" }],
-  },
-  {
-    featureType: "poi",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#d59563" }],
-  },
-  {
-    featureType: "poi.park",
-    elementType: "geometry",
-    stylers: [{ color: "#263c3f" }],
-  },
-  {
-    featureType: "poi.park",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#6b9a76" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#38414e" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#212a37" }],
-  },
-  {
-    featureType: "road",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#9ca5b3" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry",
-    stylers: [{ color: "#746855" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#1f2835" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#f3d19c" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#17263c" }],
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#515c6d" }],
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#17263c" }],
-  },
-];
+const { width } = Dimensions.get('window');
+import { API_BASE_URL } from '../config';
 
 export default function HomeScreen() {
-  const { location, errorMsg } = useContext(GlobalContext);
+  const { location, user, notifications, removeNotification, clearNotifications } = useContext(GlobalContext);
   const navigation = useNavigation();
-  const route = useRoute();
-  const mapRef = useRef(null);
-  const [heatmapActive, setHeatmapActive] = useState(false);
-  const [heatmapPoints, setHeatmapPoints] = useState([
-    { latitude: 12.9716, longitude: 77.5946, weight: 10 },
-  ]);
-  const [fetchStatus, setFetchStatus] = useState("Fetching...");
-  const [activeRoute, setActiveRoute] = useState(null);
-  const [isNavigating, setIsNavigating] = useState(false);
+  const [heatmapData, setHeatmapData] = useState([]);
+  const [reportAlerts, setReportAlerts] = useState([]);
+  const [loadingMap, setLoadingMap] = useState(true);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [notificationModalVisible, setNotificationModalVisible] = useState(false);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [responding, setResponding] = useState(false);
+  const [activeStatusMessage, setActiveStatusMessage] = useState('No active alerts nearby');
+
+  const [refreshInterval, setRefreshInterval] = useState(null);
 
   useEffect(() => {
-    const fetchHeatmapData = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/crimes/heatmap`);
-        const data = await response.json();
-        if (Array.isArray(data)) {
-          // Retain exact severity for precise geospatial plotting
-          setHeatmapPoints(data);
-          setFetchStatus(`Loaded ${data.length}`);
-        } else {
-          setFetchStatus(`Failed: Format error`);
-        }
-      } catch (err) {
-        setFetchStatus("Network Error");
-        console.error("Failed to fetch heatmap data:", err);
-      }
-    };
-    fetchHeatmapData();
+    fetchHeatmap();
+    fetchReports();
+
+    const interval = setInterval(fetchReports, 3000);
+    setRefreshInterval(interval);
+    return () => clearInterval(interval);
   }, []);
 
-  // Handle incoming route from Planning Screen
   useEffect(() => {
-    if (route.params?.selectedRoute) {
-      setActiveRoute(route.params.selectedRoute);
-      setIsNavigating(true);
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchReports();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
-      // Auto-focus on the route
-      if (
-        mapRef.current &&
-        route.params.selectedRoute.geometry.coordinates.length > 0
-      ) {
-        const coords = route.params.selectedRoute.geometry.coordinates.map(
-          (c) => ({
-            latitude: c[1],
-            longitude: c[0],
-          }),
-        );
-        mapRef.current.fitToCoordinates(coords, {
-          edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-          animated: true,
-        });
-      }
+  const fetchHeatmap = async () => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/crimes/heatmap`);
+      const data = await resp.json();
+      setHeatmapData(data);
+    } catch (err) {
+      console.error('Heatmap fetch failed', err);
+    } finally {
+      setLoadingMap(false);
     }
-  }, [route.params?.selectedRoute]);
-
-  // Handle Camera Tracking during Navigation
-  useEffect(() => {
-    if (isNavigating && location && mapRef.current) {
-      mapRef.current.animateCamera(
-        {
-          center: {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          },
-          pitch: 45,
-          heading: location.coords.heading || 0,
-          altitude: 1000,
-          zoom: 17,
-        },
-        { duration: 1000 },
-      );
-    }
-  }, [location, isNavigating]);
-
-  const initialRegion = {
-    latitude: 12.9716, // Bangalore default
-    longitude: 77.5946,
-    latitudeDelta: 0.0922,
-    longitudeDelta: 0.0421,
   };
 
-  const userCoords = location
-    ? {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/reports`);
+      const data = await resp.json();
+      const reports = (data.reports || []).filter((report) => report.status !== 'resolved');
+      console.log('Fetched reports - Total:', data.reports ? data.reports.length : 0, 'Non-resolved:', reports.length);
+      setReportAlerts(reports);
+
+      const activeResponderCount = reports.filter((report) => report.responder_id).length;
+      setActiveStatusMessage(
+        reports.length === 0
+          ? 'No active alerts nearby'
+          : activeResponderCount > 0
+          ? `${activeResponderCount} active responder${activeResponderCount > 1 ? 's' : ''} nearby`
+          : 'Emergency mode active'
+      );
+
+      setSelectedReport((prev) => {
+        if (!prev) return prev;
+        const updated = reports.find((report) => report.id === prev.id);
+        return updated || null;
+      });
+    } catch (err) {
+      console.error('Report fetch failed', err);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  const handleRespond = async () => {
+    if (!user?.phone || !selectedReport) return;
+    setResponding(true);
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/reports/${selectedReport.id}/respond`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: user.phone, action: 'respond' }),
+      });
+      const data = await resp.json();
+
+      if (data.status === 'success') {
+        setSelectedReport(data.report);
+        fetchReports();
+      } else {
+        Alert.alert('Unable to respond', data.message || 'Could not claim this alert.');
       }
-    : null;
+    } catch (err) {
+      console.error('Respond request failed', err);
+      Alert.alert('Connection Error', 'Could not update alert status.');
+    } finally {
+      setResponding(false);
+    }
+  };
 
-  return (
-    <View style={styles.container}>
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={
-          userCoords
-            ? { ...userCoords, latitudeDelta: 0.05, longitudeDelta: 0.05 }
-            : initialRegion
-        }
-        showsUserLocation={true}
-        showsMyLocationButton={false}
-        customMapStyle={darkMapStyle}
-      >
-        {userCoords && (
-          <Marker coordinate={userCoords} pinColor="blue" title="You" />
-        )}
-        {heatmapActive &&
-          heatmapPoints.slice(0, 3000).map((point, index) => {
-            const severity = point.weight;
-            let color = "rgba(0, 0, 255, 0.4)"; // Blue (Cold)
-            if (severity >= 8)
-              color = "rgba(255, 0, 0, 0.5)"; // Hot Red
-            else if (severity >= 5)
-              color = "rgba(255, 165, 0, 0.5)"; // Orange
-            else if (severity >= 3) color = "rgba(255, 255, 0, 0.4)"; // Yellow
+  const handleResolve = async () => {
+    if (!user?.phone || !selectedReport) return;
+    
+    console.log('=== RESOLVING ALERT ===', selectedReport.id);
+    
+    // Pause auto-refresh to prevent alert from reappearing
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      console.log('Paused auto-refresh interval');
+    }
+    
+    // Immediately remove from UI
+    const reportId = selectedReport.id;
+    setSelectedReport(null);
+    setReportAlerts((prev) => {
+      const updated = prev.filter((report) => report.id !== reportId);
+      console.log('Removed from reportAlerts. Before:', prev.length, 'After:', updated.length);
+      return updated;
+    });
+    if (removeNotification) {
+      removeNotification(reportId);
+      console.log('Removed from notifications');
+    }
+    setResponding(true);
 
-            return (
-              <Circle
-                key={`crime-${index}`}
-                center={{
-                  latitude: point.latitude,
-                  longitude: point.longitude,
-                }}
-                radius={severity * 150 || 500} // Radius in precise geographic meters (Increased 10x!)
-                fillColor={color}
-                strokeWidth={1}
-                strokeColor={color.replace("0.5", "0.8")}
-              />
-            );
-          })}
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/reports/${reportId}/respond`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: user.phone, action: 'resolve' }),
+      });
+      const data = await resp.json();
 
-        {activeRoute && (
-          <Polyline
-            coordinates={activeRoute.geometry.coordinates.map((c) => ({
-              latitude: c[1],
-              longitude: c[0],
-            }))}
-            strokeWidth={6}
-            strokeColor={
-              activeRoute.type.includes("SAFEST") ? "#34C759" : "#0A7AFF"
-            }
-          />
-        )}
-      </MapView>
+      if (data.status === 'success') {
+        console.log('Resolve API succeeded');
+        Alert.alert('Resolved', 'This alert has been marked as resolved.');
+        // Immediately fetch to sync with backend
+        await fetchReports();
+        // Restart refresh interval after successful resolution
+        const newInterval = setInterval(fetchReports, 3000);
+        setRefreshInterval(newInterval);
+        console.log('Restarted auto-refresh interval');
+      } else {
+        // If API fails, refresh to revert
+        await fetchReports();
+        Alert.alert('Unable to resolve', data.message || 'Could not resolve this alert.');
+        // Restart refresh interval
+        const newInterval = setInterval(fetchReports, 3000);
+        setRefreshInterval(newInterval);
+      }
+    } catch (err) {
+      console.error('Resolve request failed', err);
+      // If connection fails, refresh to revert
+      await fetchReports();
+      Alert.alert('Connection Error', 'Could not update alert status.');
+      // Restart refresh interval
+      const newInterval = setInterval(fetchReports, 3000);
+      setRefreshInterval(newInterval);
+    } finally {
+      setResponding(false);
+    }
+  };
 
-      {isNavigating && (
-        <View style={styles.navBar}>
-          <View style={styles.navInfo}>
-            <Text style={styles.navType}>{activeRoute?.type}</Text>
-            <Text style={styles.navDest}>Heading to Destination</Text>
+  const mergeAlerts = () => {
+    const unique = {};
+    [...notifications, ...reportAlerts].forEach((item) => {
+      if (!item || !item.id) return;
+      // Filter out resolved reports
+      if (item.status === 'resolved') {
+        console.log('Filtering out resolved alert:', item.id, item.status);
+        return;
+      }
+      // Keep non-resolved items
+      unique[item.id] = item;
+    });
+    const result = Object.values(unique);
+    console.log('Merged alerts count:', result.length, 'Total notifications:', notifications.length, 'Total reportAlerts:', reportAlerts.length);
+    return result;
+  };
+
+  const mergedAlerts = mergeAlerts();
+
+  const formatDateTime = (timestamp) => {
+    try {
+      return new Date(timestamp).toLocaleString();
+    } catch {
+      return timestamp;
+    }
+  };
+
+  const renderSelectedReport = () => {
+    if (!selectedReport) return null;
+
+    const status = selectedReport.status || 'pending';
+    const statusLabel = status.replace('_', ' ').toUpperCase();
+    const isPoster = selectedReport.user_id === user?.phone;
+    const alreadyResponding = selectedReport.responder_id === user?.phone;
+    const canResolve = (isPoster || alreadyResponding) && status !== 'resolved';
+    const canRespond = !isPoster && !selectedReport.responder_id && status === 'pending' && Boolean(user?.phone);
+    const responder = selectedReport.responder || null;
+    const statusMessage =
+      status === 'resolved'
+        ? 'This alert has been marked resolved and is no longer active.'
+        : status === 'in_review'
+          ? alreadyResponding
+            ? 'You are responding to this alert. Stay safe and update status when resolved.'
+            : 'A responder is on the way to help at the reported location.'
+          : 'This alert is new and waiting for a nearby responder to claim it.';
+
+    return (
+      <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]50 mb-6 p-5">
+        <View className="flex-row justify-between items-start mb-4">
+          <View className="flex-1 pr-3">
+            <Text className="text-[#4A2E35] font-bold text-xl">Alert Details</Text>
+            <Text className="text-[#9E7A80] text-sm mt-1">Tap another map pin to review other alerts.</Text>
           </View>
-          <TouchableOpacity
-            style={styles.exitNavBtn}
-            onPress={() => {
-              setIsNavigating(false);
-              setActiveRoute(null);
-            }}
-          >
-            <Text style={styles.exitText}>Exit</Text>
+          <TouchableOpacity onPress={() => setSelectedReport(null)} className="bg-[#F8E6EC] px-4 py-2 rounded-full self-start">
+            <Text className="text-[#D81B60] font-bold">Close</Text>
           </TouchableOpacity>
         </View>
-      )}
 
-      <TouchableOpacity
-        style={[styles.floatingBtn, heatmapActive ? styles.activeHeatmap : {}]}
-        onPress={() => setHeatmapActive(!heatmapActive)}
-      >
-        <Text style={styles.btnText}>
-          {heatmapActive
-            ? `🔥 Heatmap ON (${fetchStatus})`
-            : `🗺️ Heatmap OFF (${fetchStatus})`}
-        </Text>
-      </TouchableOpacity>
+        <View className="bg-[#FDF2F7] rounded-3xl p-4 mb-4 border border-[#F5C6D1]">
+          <Text className="text-[#D81B60] font-black text-base uppercase tracking-widest mb-2">{selectedReport.type}</Text>
+          <Text className="text-[#4A2E35] font-medium text-sm">{selectedReport.description}</Text>
+        </View>
 
-      <TouchableOpacity
-        style={[styles.floatingBtn, { top: 120, backgroundColor: "#007AFF" }]}
-        onPress={() => navigation.navigate("RoutePlanning")}
-      >
-        <Text style={styles.btnText}>📍 Plan Route</Text>
-      </TouchableOpacity>
-
-      {/* Simple Custom Bottom Sheet (No Reanimated Required) */}
-      <View style={styles.simpleBottomSheet}>
-        <View style={styles.contentContainer}>
-          <Text style={styles.sheetTitle}>Where to?</Text>
-          <View style={styles.searchBar}>
-            <Text style={{ color: "#999" }}>Search Destination...</Text>
+        <View className="bg-[#F8E6EC] rounded-3xl p-4 mb-4 border border-[#F5C6D1]">
+          <View className="flex-row justify-between items-center mb-3">
+            <Text className="text-[#4A2E35] font-semibold">Current Status</Text>
+            <View className={`rounded-full px-3 py-2 ${status === 'resolved' ? 'bg-[#D1F2E0]' : status === 'in_review' ? 'bg-[#FDF4E6]' : 'bg-[#F8E6EC]'}`}>
+              <Text className={`text-xs font-bold ${status === 'resolved' ? 'text-[#1F7A4E]' : status === 'in_review' ? 'text-[#B86F00]' : 'text-[#D81B60]'}`}>{statusLabel}</Text>
+            </View>
           </View>
+          <Text className="text-[#4A2E35] text-sm leading-6">{statusMessage}</Text>
+          {selectedReport.responder_id ? (
+            <Text className="text-[#9E7A80] text-xs mt-3">Responder: {alreadyResponding ? 'You' : responder?.name || selectedReport.responder_id}</Text>
+          ) : (
+            <Text className="text-[#9E7A80] text-xs mt-3">No responder assigned yet.</Text>
+          )}
+        </View>
 
-          <Text style={styles.sectionText}>Recent Routes</Text>
-          <View style={styles.recentRoute}>
-            <Text style={styles.routeText}>Koramangala 4th Block</Text>
+        {responder && (
+          <View className="bg-[#EFF6FF] rounded-3xl p-4 mb-4 border border-[#D1E3FF]">
+            <Text className="text-[#4A2E35] font-semibold mb-2">Responder Details</Text>
+            <Text className="text-[#4A2E35] text-sm">Name: {responder.name || responder.phone}</Text>
+            <Text className="text-[#4A2E35] text-sm mt-1">Contact: {responder.phone}</Text>
+            {responder.area ? <Text className="text-[#4A2E35] text-sm mt-1">Area: {responder.area}</Text> : null}
           </View>
-          <View style={styles.recentRoute}>
-            <Text style={styles.routeText}>Indiranagar Metro</Text>
+        )}
+
+        {canResolve && (
+          <TouchableOpacity
+            onPress={handleResolve}
+            disabled={responding}
+            className="bg-[#1F7A4E] rounded-3xl px-4 py-3 mb-4 items-center"
+          >
+            {responding ? (
+              <Text className="text-white font-bold">Resolving alert...</Text>
+            ) : (
+              <Text className="text-white font-bold">RESOLVED</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {canRespond && (
+          <TouchableOpacity
+            onPress={handleRespond}
+            disabled={responding}
+            className="bg-[#D81B60] rounded-3xl px-4 py-3 mb-4 items-center"
+          >
+            {responding ? (
+              <Text className="text-white font-bold">Claiming alert...</Text>
+            ) : (
+              <Text className="text-white font-bold">I’m Responding</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        <View className="space-y-3">
+          <View className="flex-row justify-between items-center">
+            <Text className="text-[#4A2E35] font-semibold">Location</Text>
+            <Text className="text-[#9E7A80] text-right text-sm">{(typeof selectedReport.latitude === 'number' ? selectedReport.latitude.toFixed(4) : selectedReport.latitude) ?? '-'}, {(typeof selectedReport.longitude === 'number' ? selectedReport.longitude.toFixed(4) : selectedReport.longitude) ?? '-'}</Text>
+          </View>
+          <View className="flex-row justify-between items-center">
+            <Text className="text-[#4A2E35] font-semibold">Reported</Text>
+            <Text className="text-[#9E7A80] text-sm">{formatDateTime(selectedReport.timestamp || selectedReport.created_at)}</Text>
           </View>
         </View>
       </View>
-    </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FDF8F9' }}>
+      <ScrollView className="flex-1 px-6 pt-4" showsVerticalScrollIndicator={false}>
+        
+        {/* Header Section */}
+        <View className="flex-row justify-between items-center mb-6">
+          <View>
+            <Text className="text-3xl font-black text-[#4A2E35]">Hello, <Text className="text-[#D81B60]">{user?.name?.split(' ')[0] || 'Explorer'}</Text></Text>
+            <Text className="text-[#9E7A80] font-medium text-sm">Welcome to your safety dashboard</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setNotificationModalVisible(true)}
+            className="bg-white p-3 rounded-2xl shadow-sm border border-[#E5B2B9]50"
+            style={{ position: 'relative' }}
+          >
+            <Bell size={24} color="#D81B60" />
+            {mergedAlerts.length > 0 && (
+              <View style={{ position: 'absolute', top: 2, right: 2, backgroundColor: '#D81B60', borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1 }}>
+                <Text style={{ color: 'white', fontSize: 10, fontWeight: '700' }}>{mergedAlerts.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <Modal visible={notificationModalVisible} animationType="slide" transparent>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 30, padding: 20, maxHeight: '85%' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#4A2E35' }}>Alerts</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {notifications.length > 0 && (
+                    <TouchableOpacity onPress={clearNotifications}>
+                      <Text style={{ color: '#D81B60', fontWeight: '700' }}>Clear All</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => setNotificationModalVisible(false)}>
+                    <Text style={{ color: '#D81B60', fontWeight: '700' }}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {loadingReports ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator color="#D81B60" />
+                </View>
+              ) : mergedAlerts.length === 0 ? (
+                <Text style={{ color: '#9E7A80', fontSize: 14 }}>No alerts available yet.</Text>
+              ) : (
+                <ScrollView>
+                  {mergedAlerts.map((report) => (
+                    <TouchableOpacity
+                      key={report.id}
+                      onPress={() => {
+                        setSelectedReport(report);
+                        setNotificationModalVisible(false);
+                      }}
+                      style={{ backgroundColor: '#FDF8F9', marginBottom: 12, borderRadius: 22, padding: 16, borderWidth: 1, borderColor: '#E5B2B9' }}
+                    >
+                      <Text style={{ color: '#4A2E35', fontWeight: '800', marginBottom: 4 }}>{report.type}</Text>
+                      <Text style={{ color: '#9E7A80', fontSize: 13, marginBottom: 6 }} numberOfLines={2}>{report.description}</Text>
+                      <Text style={{ color: '#D81B60', fontSize: 11 }}>{formatDateTime(report.timestamp || report.created_at)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {renderSelectedReport()}
+
+        {/* Live Safety Map Card */}
+        <View className="bg-white rounded-[32px] shadow-lg border border-[#E5B2B9]50 mb-8 overflow-hidden h-64">
+           {loadingMap ? (
+             <View className="flex-1 items-center justify-center">
+                <ActivityIndicator color="#D81B60" />
+                <Text className="text-gray-400 mt-2 text-xs font-bold uppercase">Loading Heatmap...</Text>
+             </View>
+           ) : (
+             <MapView
+               provider={PROVIDER_GOOGLE}
+               className="flex-1"
+               initialRegion={{
+                latitude: location?.coords?.latitude || 12.9716,
+                longitude: location?.coords?.longitude || 77.5946,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+               }}
+               customMapStyle={mapStyle}
+             >
+               {heatmapData.length > 0 && heatmapData.slice(0, 3000).map((point, index) => {
+                 const severity = point.weight;
+                 let color = 'rgba(0, 0, 255, 0.08)';
+                 if (severity >= 8) color = 'rgba(216, 27, 96, 0.15)';
+                 else if (severity >= 5) color = 'rgba(255, 165, 0, 0.12)';
+                 else if (severity >= 3) color = 'rgba(255, 255, 0, 0.1)';
+
+                 return (
+                   <Circle
+                     key={`crime-${index}`}
+                     center={{ latitude: point.latitude, longitude: point.longitude }}
+                     radius={severity * 80 || 300}
+                     fillColor={color}
+                     strokeWidth={0}
+                     strokeColor="transparent"
+                   />
+                 );
+               })}
+
+               {mergedAlerts.map((report) => (
+                 <Marker
+                   key={`alert-${report.id}`}
+                   coordinate={{ latitude: report.latitude, longitude: report.longitude }}
+                   pinColor="#D81B60"
+                   onPress={() => setSelectedReport(report)}
+                 />
+               ))}
+
+               {location && <Marker coordinate={location.coords} pinColor="#000000" />}
+             </MapView>
+           )}
+           <View className="absolute bottom-4 left-4 right-4 bg-white/90 p-3 rounded-2xl border border-white flex-row items-center shadow-sm">
+              <Layers size={18} color="#D81B60" className="mr-2" />
+              <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Active Crime Heatmap • Bangalore</Text>
+           </View>
+        </View>
+
+        {/* Search Bar */}
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('RouteTab')}
+          className="bg-white h-16 rounded-3xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-8"
+        >
+          <Search size={22} color="#DDA7A5" />
+          <Text className="flex-1 ml-4 text-[#9E7A80] font-medium">Where do you want to go?</Text>
+          <LinearGradient colors={['#E5B2B9', '#D81B60']} className="p-3 rounded-2xl">
+            <Send size={18} color="white" />
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Quick Features Grid */}
+        <View className="flex-row justify-between mb-8">
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Report')}
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center mr-2"
+          >
+            <View className="bg-[#D81B6015] p-4 rounded-full mb-3">
+              <AlertTriangle size={24} color="#D81B60" />
+            </View>
+            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Report</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('SOSModal')}
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center mx-2"
+          >
+            <View className="bg-[#C7158515] p-4 rounded-full mb-3">
+              <Shield size={24} color="#C71585" />
+            </View>
+            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">SOS</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Zones')}
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center ml-2"
+          >
+            <View className="bg-[#34C75915] p-4 rounded-full mb-3">
+              <Shield size={24} color="#34C759" />
+            </View>
+            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Toolkit</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Global Security Platform Banner */}
+        <LinearGradient 
+          colors={['#D81B60', '#E5B2B9']} 
+          start={{x: 0, y: 0}} end={{x: 1, y: 1}} 
+          className="p-6 rounded-[32px] shadow-xl mb-10 flex-row items-center justify-between"
+        >
+          <View className="flex-1 pr-6">
+            <Text className="text-white/80 font-bold text-xs uppercase tracking-widest mb-1">Network Status</Text>
+            <Text className="text-white text-2xl font-black mb-2">AEGIS Active</Text>
+            <Text className="text-white/90 text-xs font-medium leading-5">
+              Live spatial routing and crime prediction active in your current location.
+            </Text>
+          </View>
+          <View className="bg-white/20 p-4 rounded-full border border-white/30">
+            <Shield size={40} color="white" />
+          </View>
+        </LinearGradient>
+
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: { ...StyleSheet.absoluteFillObject },
-  floatingBtn: {
-    position: "absolute",
-    top: 60,
-    right: 20,
-    backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 25,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
-  },
-  activeHeatmap: {
-    backgroundColor: "#ffdede",
-    borderWidth: 1,
-    borderColor: "red",
-  },
-  btnText: { fontWeight: "bold" },
-  simpleBottomSheet: {
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 10,
-    paddingBottom: 30, // Safe area padding
-  },
-  contentContainer: { padding: 20 },
-  sheetTitle: { fontSize: 24, fontWeight: "bold", marginBottom: 15 },
-  searchBar: {
-    height: 50,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 10,
-    justifyContent: "center",
-    paddingHorizontal: 15,
-    marginBottom: 20,
-  },
-  sectionText: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 10,
-    color: "#444",
-  },
-  recentRoute: {
-    padding: 15,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ccc",
-  },
-  routeText: { fontSize: 16 },
-  navBar: {
-    position: "absolute",
-    top: 60,
-    left: 20,
-    right: 20,
-    height: 80,
-    backgroundColor: "#000",
-    borderRadius: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    justifyContent: "space-between",
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  navInfo: { flex: 1 },
-  navType: { color: "#34C759", fontWeight: "bold", fontSize: 12 },
-  navDest: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  exitNavBtn: {
-    backgroundColor: "#FF3B30",
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  exitText: { color: "#fff", fontWeight: "bold" },
-});
+const mapStyle = [
+  { "elementType": "geometry", "stylers": [{ "color": "#fdf8f9" }] },
+  { "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#9e7a80" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
+  { "featureType": "administrative.land_parcel", "elementType": "labels.text.fill", "stylers": [{ "color": "#bdbdbd" }] },
+  { "featureType": "poi", "elementType": "geometry", "stylers": [{ "color": "#eeeeee" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9c9c9" }] }
+];

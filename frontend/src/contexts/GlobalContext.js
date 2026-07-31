@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect } from 'react';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const GlobalContext = createContext();
 
@@ -8,6 +9,10 @@ export const GlobalProvider = ({ children }) => {
   const [isSOSActive, setIsSOSActive] = useState(false);
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [user, setUser] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isContextLoaded, setIsContextLoaded] = useState(false);
 
   // Populated after login (SOSScreen.js needs this to identify the victim & text the contact)
   const [userProfile, setUserProfile] = useState({
@@ -22,6 +27,38 @@ export const GlobalProvider = ({ children }) => {
   const [sosError, setSosError] = useState(null);
 
   const toggleSOS = () => setIsSOSActive(!isSOSActive);
+  const addNotification = (notification) => setNotifications((prev) => [notification, ...prev]);
+  const removeNotification = (id) => setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const clearNotifications = () => setNotifications([]);
+  
+  const handleSetUser = async (userData) => {
+    setUser(userData);
+    setIsLoggedIn(true);
+    await AsyncStorage.setItem('@aegis_user', JSON.stringify(userData));
+  };
+
+  const logout = async () => { 
+    setUser(null); 
+    setIsLoggedIn(false); 
+    await AsyncStorage.removeItem('@aegis_user');
+  };
+
+  useEffect(() => {
+    const loadState = async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem('@aegis_user');
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+          setIsLoggedIn(true);
+        }
+      } catch (e) {
+        console.error("Failed to load user state", e);
+      } finally {
+        setIsContextLoaded(true);
+      }
+    };
+    loadState();
+  }, []);
 
   const triggerSOS = async () => {
     if (!location) {
@@ -109,6 +146,16 @@ export const GlobalProvider = ({ children }) => {
         triggerSOS,
         cancelSOS,
         sosError,
+        user,
+        setUser: handleSetUser,
+        notifications,
+        addNotification,
+        removeNotification,
+        clearNotifications,
+        isLoggedIn,
+        setIsLoggedIn,
+        logout,
+        isContextLoaded,
       }}
     >
       {children}

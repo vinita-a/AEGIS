@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Animated, Dimensions, Linking, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ShieldAlert, XCircle, PhoneCall, AlertTriangle, Users } from 'lucide-react-native';
+
+const { width, height } = Dimensions.get('window');
 
 export default function SOSScreen() {
   const [countdown, setCountdown] = useState(15);
@@ -10,6 +15,7 @@ export default function SOSScreen() {
   const hasTriggered = useRef(false);
   const navigation = useNavigation();
   const { location, userProfile, activeSOS, triggerSOS, cancelSOS, sosError } = useContext(GlobalContext);
+  const pulseAnim = new Animated.Value(1);
 
   const sendEmergencySMS = () => {
     const phone = userProfile.emergencyContactPhone;
@@ -34,6 +40,13 @@ export default function SOSScreen() {
   };
 
   useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.2, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    ).start();
+
     if (hasTriggered.current) return;
     let timer;
     if (countdown > 0) {
@@ -55,120 +68,78 @@ export default function SOSScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.headerText}>EMERGENCY SOS</Text>
+    <LinearGradient colors={['#D81B60', '#E5B2B9']} className="flex-1">
+      <SafeAreaView className="flex-1 items-center justify-between py-12 px-8">
 
-      <View style={styles.pulseContainer}>
-        <Text style={styles.timerText}>{countdown > 0 ? countdown : '!'}</Text>
-      </View>
+        {/* Header */}
+        <View className="items-center">
+           <Text className="text-white text-3xl font-black tracking-widest uppercase italic">Emergency SOS</Text>
+           <Text className="text-white/80 font-bold mt-2">Help is on the way</Text>
+        </View>
 
-      <Text style={styles.statusText}>{dispatching ? 'Dispatching...' : status}</Text>
+        {/* Pulse Button Container */}
+        <View className="items-center justify-center">
+          <Animated.View
+            style={{ transform: [{ scale: pulseAnim }] }}
+            className="w-[240px] h-[240px] rounded-full bg-white/20 items-center justify-center border border-white/30"
+          >
+            <View className="w-[180px] h-[180px] rounded-full bg-white items-center justify-center shadow-2xl">
+              <Text className="text-6xl font-black text-[#D81B60]">{countdown > 0 ? countdown : '!'}</Text>
+            </View>
+          </Animated.View>
+        </View>
 
-      {countdown > 0 && (
-        <Text style={styles.subText}>Activating automatically in {countdown}s</Text>
-      )}
+        {/* Status Section */}
+        <View className="items-center w-full">
+           <Text className="text-white text-xl font-bold text-center mb-4">{dispatching ? 'Dispatching...' : status}</Text>
 
-      {activeSOS?.status === 'active' && !userProfile.emergencyContactPhone && (
-        <Text style={styles.warnText}>
-          No emergency contact on file — add one from your profile to auto-notify them.
-        </Text>
-      )}
+           <View className="flex-row space-x-4 mb-8">
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1">
+                 <ShieldAlert size={28} color="white" />
+                 <Text className="text-white text-xs font-bold mt-2">Authorities</Text>
+              </View>
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1 border border-white/40">
+                 <Users size={28} color="white" />
+                 <Text className="text-white text-xs font-bold mt-2">Community</Text>
+              </View>
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1">
+                 <PhoneCall size={28} color="white" />
+                 <Text className="text-white text-xs font-bold mt-2">Contacts</Text>
+              </View>
+           </View>
 
-      {sosError && <Text style={styles.warnText}>{sosError}</Text>}
+           {countdown > 0 && (
+             <Text className="text-white/60 font-medium mb-6 italic">Activating in {countdown}s</Text>
+           )}
 
-      {countdown > 0 && (
-        <TouchableOpacity style={styles.triggerNowBtn} onPress={handleTriggerNow}>
-          <Text style={styles.triggerNowText}>SOS NOW</Text>
-        </TouchableOpacity>
-      )}
+           {activeSOS?.status === 'active' && !userProfile.emergencyContactPhone && (
+             <Text className="text-white bg-black/25 text-xs text-center px-4 py-2 rounded-xl mb-4 max-w-[85%]">
+               No emergency contact on file — add one from your profile to auto-notify them.
+             </Text>
+           )}
 
-      <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel}>
-        <Text style={styles.cancelText}>CANCEL & I'M SAFE</Text>
-      </TouchableOpacity>
-    </View>
+           {sosError && (
+             <Text className="text-white bg-black/25 text-xs text-center px-4 py-2 rounded-xl mb-4 max-w-[85%]">
+               {sosError}
+             </Text>
+           )}
+
+           {countdown > 0 && (
+             <TouchableOpacity onPress={handleTriggerNow} className="w-full bg-black h-14 rounded-full items-center justify-center mb-4">
+                <Text className="text-white text-lg font-black uppercase">SOS Now</Text>
+             </TouchableOpacity>
+           )}
+
+           <TouchableOpacity
+             onPress={handleCancel}
+             className="w-full bg-white/10 border border-white/30 h-16 rounded-full flex-row items-center justify-center"
+           >
+              <XCircle size={24} color="white" className="mr-3" />
+              <Text className="text-white text-xl font-black uppercase">I'm Safe, Cancel</Text>
+           </TouchableOpacity>
+        </View>
+
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ff3b30',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerText: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
-    letterSpacing: 2,
-    marginBottom: 40,
-  },
-  pulseContainer: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 30,
-    borderWidth: 5,
-    borderColor: '#fff',
-  },
-  timerText: {
-    fontSize: 72,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-    marginTop: 20,
-  },
-  subText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 10,
-    marginBottom: 50,
-  },
-  warnText: {
-    color: '#fff',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    fontSize: 13,
-    textAlign: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginTop: 16,
-    maxWidth: '85%',
-  },
-  triggerNowBtn: {
-    backgroundColor: '#000',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 30,
-    marginTop: 30,
-  },
-  triggerNowText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  cancelBtn: {
-    backgroundColor: '#000',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 30,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-  },
-  cancelText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-});
