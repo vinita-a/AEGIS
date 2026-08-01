@@ -1,5 +1,5 @@
 import os
-import datetime
+from typing import Optional
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -169,8 +169,8 @@ class SOSResponse(BaseModel):
     latitude: float
     longitude: float
     status: str
-    created_at: datetime.datetime
-    cancelled_at: datetime.datetime | None = None
+    created_at: datetime
+    cancelled_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -197,7 +197,7 @@ def cancel_sos(sos_id: int, db = Depends(get_db)):
     if not sos:
         raise HTTPException(status_code=404, detail="SOS event not found")
     sos.status = "cancelled"
-    sos.cancelled_at = datetime.datetime.utcnow()
+    sos.cancelled_at = datetime.utcnow()
     db.commit()
     db.refresh(sos)
     return sos
