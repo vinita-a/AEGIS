@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
@@ -10,8 +10,25 @@ import { MapView, Circle, Marker, PROVIDER_GOOGLE } from '../components/MapViewW
 const { width } = Dimensions.get('window');
 import { API_BASE_URL } from '../config';
 
+function PulsingSOSMarker() {
+  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.4, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return (
+    <Animated.View style={{ transform: [{ scale: pulseAnim }], backgroundColor: '#FF1744', padding: 8, borderRadius: 20, borderWidth: 3, borderColor: 'white' }}>
+      <Text style={{ fontSize: 16 }}>🚨</Text>
+    </Animated.View>
+  );
+}
+
 export default function HomeScreen() {
-  const { location, user, notifications, removeNotification, clearNotifications } = useContext(GlobalContext);
+  const { location, user, notifications, removeNotification, clearNotifications, nearbySOS, respondToSOS } = useContext(GlobalContext);
   const navigation = useNavigation();
   const [heatmapData, setHeatmapData] = useState([]);
   const [reportAlerts, setReportAlerts] = useState([]);
@@ -20,6 +37,8 @@ export default function HomeScreen() {
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [responding, setResponding] = useState(false);
+  const [selectedSOS, setSelectedSOS] = useState(null);
+  const [respondingSOS, setRespondingSOS] = useState(false);
   const [activeStatusMessage, setActiveStatusMessage] = useState('No active alerts nearby');
 
   const [refreshInterval, setRefreshInterval] = useState(null);
@@ -202,6 +221,20 @@ export default function HomeScreen() {
     }
   };
 
+  const formatDistance = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`);
+
+  const handleRespondToSOS = async () => {
+    if (!selectedSOS) return;
+    setRespondingSOS(true);
+    const result = await respondToSOS(selectedSOS.id);
+    setRespondingSOS(false);
+    if (result.success) {
+      setSelectedSOS(result.sos);
+    } else {
+      Alert.alert('Unable to respond', result.error);
+    }
+  };
+
   const renderSelectedReport = () => {
     if (!selectedReport) return null;
 
@@ -373,6 +406,53 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
+        <Modal visible={!!selectedSOS} animationType="slide" transparent>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 30, padding: 24, borderWidth: 2, borderColor: '#FF1744' }}>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: '#D81B60', marginBottom: 8 }}>🚨 Emergency SOS</Text>
+              {selectedSOS && (
+                <>
+                  <Text style={{ color: '#4A2E35', fontSize: 15, marginBottom: 4 }}>User: {selectedSOS.user_name}</Text>
+                  <Text style={{ color: '#4A2E35', fontSize: 15, marginBottom: 4 }}>Phone: {selectedSOS.user_phone}</Text>
+                  <Text style={{ color: '#9E7A80', fontSize: 13, marginBottom: 16 }}>{formatDistance(selectedSOS.distance_km)} away</Text>
+
+                  {selectedSOS.responder_id ? (
+                    <Text style={{ color: '#1F7A4E', fontWeight: '700', marginBottom: 16 }}>
+                      {selectedSOS.responder_id === user?.phone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
+                    </Text>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleRespondToSOS}
+                      disabled={respondingSOS}
+                      style={{ backgroundColor: '#D81B60', borderRadius: 20, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}
+                    >
+                      <Text style={{ color: 'white', fontWeight: '900' }}>{respondingSOS ? 'Responding...' : 'I Can Help / Respond'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+              <TouchableOpacity onPress={() => setSelectedSOS(null)}>
+                <Text style={{ color: '#9E7A80', textAlign: 'center', fontWeight: '700' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {nearbySOS.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setSelectedSOS(nearbySOS[0])}
+            activeOpacity={0.85}
+            style={{ backgroundColor: '#D81B60', borderRadius: 24, padding: 16, marginBottom: 16, borderWidth: 2, borderColor: '#FF1744' }}
+          >
+            <Text style={{ color: 'white', fontWeight: '900', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
+              🚨 Community Emergency Alert
+            </Text>
+            <Text style={{ color: 'white', fontWeight: '700', marginTop: 4 }}>
+              SOS {formatDistance(nearbySOS[0].distance_km)} away! User: {nearbySOS[0].user_name} (Phone: {nearbySOS[0].user_phone})
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {renderSelectedReport()}
 
         {/* Live Safety Map Card */}
@@ -420,6 +500,17 @@ export default function HomeScreen() {
                    pinColor="#D81B60"
                    onPress={() => setSelectedReport(report)}
                  />
+               ))}
+
+               {nearbySOS.map((sos) => (
+                 <Marker
+                   key={`sos-${sos.id}`}
+                   coordinate={{ latitude: sos.latitude, longitude: sos.longitude }}
+                   onPress={() => setSelectedSOS(sos)}
+                   tracksViewChanges={true}
+                 >
+                   <PulsingSOSMarker />
+                 </Marker>
                ))}
 
                {location && <Marker coordinate={location.coords} pinColor="#000000" />}
