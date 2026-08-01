@@ -221,7 +221,7 @@ export default function HomeScreen() {
     }
   };
 
-  const formatDistance = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`);
+  const formatDistance = (km) => (km == null ? '—' : km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`);
 
   useEffect(() => {
     // Keep the open SOS modal in sync with live polling data from GlobalContext.
@@ -243,7 +243,11 @@ export default function HomeScreen() {
     const result = await respondToSOS(sosIdAtRequestTime);
     setRespondingSOS(false);
     if (result.success) {
-      setSelectedSOS((current) => (current && current.id === sosIdAtRequestTime ? result.sos : current));
+      setSelectedSOS((current) =>
+        current && current.id === sosIdAtRequestTime
+          ? { ...result.sos, distance_km: current.distance_km }
+          : current
+      );
     } else {
       Alert.alert('Unable to respond', result.error);
     }

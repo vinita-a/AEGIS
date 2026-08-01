@@ -55,6 +55,12 @@ export default function LoginScreen() {
       if (data.status === 'success') {
         if (data.user_exists) {
           setUser(data.user);
+          setUserProfile({
+            name: data.user.name || '',
+            phone: data.user.phone || '',
+            emergencyContactName: '',
+            emergencyContactPhone: '',
+          });
           setIsLoggedIn(true);
           navigation.replace('Main');
         } else {
