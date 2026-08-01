@@ -124,6 +124,12 @@ export default function SOSScreen() {
              </Text>
            )}
 
+           {activeSOS?.status === 'responding' && (
+             <Text className="text-white bg-black/25 text-sm text-center px-4 py-3 rounded-xl mb-4 max-w-[85%] font-bold">
+               Community Responder {activeSOS.responder_name} ({activeSOS.responder_phone}) is en route!
+             </Text>
+           )}
+
            {countdown > 0 && (
              <TouchableOpacity onPress={handleTriggerNow} className="w-full bg-black h-14 rounded-full items-center justify-center mb-4">
                 <Text className="text-white text-lg font-black uppercase">SOS Now</Text>
