@@ -223,13 +223,27 @@ export default function HomeScreen() {
 
   const formatDistance = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`);
 
+  useEffect(() => {
+    // Keep the open SOS modal in sync with live polling data from GlobalContext.
+    // GET /api/sos/active only ever returns status in ("active", "responding"), so
+    // an id disappearing from nearbySOS means it was resolved/cancelled (or moved
+    // out of radius) — in that case close the modal rather than show a stale
+    // snapshot with a "respond" button for an SOS that's no longer actionable.
+    setSelectedSOS((prev) => {
+      if (!prev) return prev;
+      const updated = nearbySOS.find((sos) => sos.id === prev.id);
+      return updated || null;
+    });
+  }, [nearbySOS]);
+
   const handleRespondToSOS = async () => {
     if (!selectedSOS) return;
+    const sosIdAtRequestTime = selectedSOS.id;
     setRespondingSOS(true);
-    const result = await respondToSOS(selectedSOS.id);
+    const result = await respondToSOS(sosIdAtRequestTime);
     setRespondingSOS(false);
     if (result.success) {
-      setSelectedSOS(result.sos);
+      setSelectedSOS((current) => (current && current.id === sosIdAtRequestTime ? result.sos : current));
     } else {
       Alert.alert('Unable to respond', result.error);
     }
