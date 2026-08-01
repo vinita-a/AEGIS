@@ -181,9 +181,16 @@ class SOSResponse(BaseModel):
     status: str
     created_at: datetime
     cancelled_at: Optional[datetime] = None
+    responder_id: Optional[str] = None
+    responder_name: Optional[str] = None
+    responder_phone: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class SOSRespondRequest(BaseModel):
+    responder_phone: str
+    responder_name: str
 
 @app.post("/api/sos/trigger", response_model=SOSResponse)
 def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
@@ -239,6 +246,27 @@ def get_active_sos(lat: float, lon: float, radius: float = 5.0, exclude_phone: s
 
     results.sort(key=lambda r: r["distance_km"])
     return {"sos_events": results}
+
+@app.post("/api/sos/{sos_id}/respond", response_model=SOSResponse)
+def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)):
+    """Claim an active SOS as a community responder."""
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    if not sos:
+        raise HTTPException(status_code=404, detail="SOS event not found")
+    if sos.status == "cancelled":
+        raise HTTPException(status_code=400, detail="This SOS is no longer active")
+    if sos.user_phone == payload.responder_phone:
+        raise HTTPException(status_code=400, detail="Cannot respond to your own SOS")
+    if sos.responder_id and sos.responder_id != payload.responder_phone:
+        raise HTTPException(status_code=400, detail="This SOS is already being handled by another responder")
+
+    sos.status = "responding"
+    sos.responder_id = payload.responder_phone
+    sos.responder_name = payload.responder_name
+    sos.responder_phone = payload.responder_phone
+    db.commit()
+    db.refresh(sos)
+    return sos
 
 # --- AUTHENTICATION ENDPOINTS ---
 
