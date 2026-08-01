@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import math
 
 app = FastAPI(title="AEGIS API")
 
@@ -83,6 +84,15 @@ def get_user_info(db, phone: str):
         "area": user.area if user else None,
         "profile_photo": None
     }
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points, in kilometers."""
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
 
 # Create all tables (note: PostGIS extension must be active in DB)
 Base.metadata.create_all(bind=engine)
@@ -201,6 +211,34 @@ def cancel_sos(sos_id: int, db = Depends(get_db)):
     db.commit()
     db.refresh(sos)
     return sos
+
+@app.get("/api/sos/active")
+def get_active_sos(lat: float, lon: float, radius: float = 5.0, exclude_phone: str = None, db = Depends(get_db)):
+    """Return active/responding SOS events within `radius` km of (lat, lon), nearest first."""
+    query = db.query(models.SOSEvent).filter(models.SOSEvent.status.in_(["active", "responding"]))
+    if exclude_phone:
+        query = query.filter(models.SOSEvent.user_phone != exclude_phone)
+
+    results = []
+    for e in query.all():
+        distance = haversine_km(lat, lon, e.latitude, e.longitude)
+        if distance <= radius:
+            results.append({
+                "id": e.id,
+                "user_name": e.user_name,
+                "user_phone": e.user_phone,
+                "latitude": e.latitude,
+                "longitude": e.longitude,
+                "status": e.status,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "responder_id": e.responder_id,
+                "responder_name": e.responder_name,
+                "responder_phone": e.responder_phone,
+                "distance_km": round(distance, 3),
+            })
+
+    results.sort(key=lambda r: r["distance_km"])
+    return {"sos_events": results}
 
 # --- AUTHENTICATION ENDPOINTS ---
 
