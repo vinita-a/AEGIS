@@ -4,7 +4,7 @@ import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from database import engine, Base, SessionLocal, get_db
 import models
 import time
@@ -249,23 +249,39 @@ def get_active_sos(lat: float, lon: float, radius: float = 5.0, exclude_phone: s
 
 @app.post("/api/sos/{sos_id}/respond", response_model=SOSResponse)
 def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)):
-    """Claim an active SOS as a community responder."""
-    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
-    if not sos:
-        raise HTTPException(status_code=404, detail="SOS event not found")
-    if sos.status == "cancelled":
-        raise HTTPException(status_code=400, detail="This SOS is no longer active")
-    if sos.user_phone == payload.responder_phone:
-        raise HTTPException(status_code=400, detail="Cannot respond to your own SOS")
-    if sos.responder_id and sos.responder_id != payload.responder_phone:
+    """Claim an active SOS as a community responder.
+
+    Uses a single atomic conditional UPDATE (rather than read-then-write) so that
+    two near-simultaneous claims on the same SOS can't both succeed: the DB row
+    is only updated if it still satisfies all the claim conditions at UPDATE time,
+    closing the TOCTOU gap between the check and the commit.
+    """
+    updated = db.query(models.SOSEvent).filter(
+        models.SOSEvent.id == sos_id,
+        models.SOSEvent.status != "cancelled",
+        models.SOSEvent.user_phone != payload.responder_phone,
+        or_(models.SOSEvent.responder_id.is_(None), models.SOSEvent.responder_id == payload.responder_phone),
+    ).update({
+        "status": "responding",
+        "responder_id": payload.responder_phone,
+        "responder_name": payload.responder_name,
+        "responder_phone": payload.responder_phone,
+    }, synchronize_session=False)
+    db.commit()
+
+    if updated == 0:
+        # Nothing matched the atomic UPDATE's conditions — re-fetch to determine
+        # which specific error applies.
+        sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+        if not sos:
+            raise HTTPException(status_code=404, detail="SOS event not found")
+        if sos.status == "cancelled":
+            raise HTTPException(status_code=400, detail="This SOS is no longer active")
+        if sos.user_phone == payload.responder_phone:
+            raise HTTPException(status_code=400, detail="Cannot respond to your own SOS")
         raise HTTPException(status_code=400, detail="This SOS is already being handled by another responder")
 
-    sos.status = "responding"
-    sos.responder_id = payload.responder_phone
-    sos.responder_name = payload.responder_name
-    sos.responder_phone = payload.responder_phone
-    db.commit()
-    db.refresh(sos)
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
     return sos
 
 # --- AUTHENTICATION ENDPOINTS ---
