@@ -25,6 +25,7 @@ export const GlobalProvider = ({ children }) => {
   // The currently dispatched SOS record (null when no SOS is active), and any dispatch error
   const [activeSOS, setActiveSOS] = useState(null);
   const [sosError, setSosError] = useState(null);
+  const [nearbySOS, setNearbySOS] = useState([]);
 
   const toggleSOS = () => setIsSOSActive(!isSOSActive);
   const addNotification = (notification) => setNotifications((prev) => [notification, ...prev]);
@@ -101,6 +102,68 @@ export const GlobalProvider = ({ children }) => {
     }
   };
 
+  const fetchNearbySOS = async () => {
+    if (!location || !userProfile.phone) return;
+    try {
+      const params = new URLSearchParams({
+        lat: location.coords.latitude,
+        lon: location.coords.longitude,
+        radius: 5,
+        exclude_phone: userProfile.phone,
+      });
+      const resp = await fetch(`${API_BASE_URL}/api/sos/active?${params}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setNearbySOS(data.sos_events || []);
+    } catch (err) {
+      console.error('Nearby SOS fetch failed:', err);
+    }
+  };
+
+  const respondToSOS = async (sosId) => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/sos/${sosId}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          responder_phone: userProfile.phone,
+          responder_name: userProfile.name || 'A community member',
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        return { success: false, error: data.detail || 'Could not respond to this SOS.' };
+      }
+      await fetchNearbySOS();
+      return { success: true, sos: data };
+    } catch (err) {
+      console.error('Respond to SOS failed:', err);
+      return { success: false, error: 'Could not reach AEGIS servers.' };
+    }
+  };
+
+  useEffect(() => {
+    if (!location || !userProfile.phone) return;
+    fetchNearbySOS();
+    const interval = setInterval(fetchNearbySOS, 3000);
+    return () => clearInterval(interval);
+  }, [location?.coords?.latitude, location?.coords?.longitude, userProfile.phone]);
+
+  useEffect(() => {
+    if (!activeSOS || activeSOS.status === 'cancelled') return;
+    const interval = setInterval(async () => {
+      try {
+        const resp = await fetch(`${API_BASE_URL}/api/sos/${activeSOS.id}/status`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setActiveSOS(data);
+      } catch (err) {
+        console.error('SOS status poll failed:', err);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activeSOS?.id, activeSOS?.status]);
+
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -146,6 +209,8 @@ export const GlobalProvider = ({ children }) => {
         triggerSOS,
         cancelSOS,
         sosError,
+        nearbySOS,
+        respondToSOS,
         user,
         setUser: handleSetUser,
         notifications,
