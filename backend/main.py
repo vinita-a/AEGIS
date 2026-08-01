@@ -100,6 +100,20 @@ def ensure_report_columns():
         db.close()
 
 @app.on_event("startup")
+def ensure_sos_columns():
+    db = SessionLocal()
+    try:
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_name VARCHAR"))
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_phone VARCHAR"))
+        db.commit()
+    except Exception as e:
+        print(f"Error ensuring sos columns: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+@app.on_event("startup")
 def load_csv_data():
     db = SessionLocal()
     try:
