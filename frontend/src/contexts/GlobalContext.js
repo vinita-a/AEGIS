@@ -151,12 +151,16 @@ export const GlobalProvider = ({ children }) => {
 
   useEffect(() => {
     if (!activeSOS || activeSOS.status === 'cancelled') return;
+    const sosIdAtPollTime = activeSOS.id;
     const interval = setInterval(async () => {
       try {
-        const resp = await fetch(`${API_BASE_URL}/api/sos/${activeSOS.id}/status`);
+        const resp = await fetch(`${API_BASE_URL}/api/sos/${sosIdAtPollTime}/status`);
         if (!resp.ok) return;
         const data = await resp.json();
-        setActiveSOS(data);
+        setActiveSOS((current) => {
+          if (!current || current.id !== sosIdAtPollTime) return current; // stale response, ignore
+          return data;
+        });
       } catch (err) {
         console.error('SOS status poll failed:', err);
       }
