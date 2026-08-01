@@ -284,6 +284,14 @@ def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)
     sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
     return sos
 
+@app.get("/api/sos/{sos_id}/status", response_model=SOSResponse)
+def get_sos_status(sos_id: int, db = Depends(get_db)):
+    """Poll the current state of an SOS event (for the victim's screen)."""
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    if not sos:
+        raise HTTPException(status_code=404, detail="SOS event not found")
+    return sos
+
 # --- AUTHENTICATION ENDPOINTS ---
 
 @app.post("/api/auth/send-otp")
